@@ -10,16 +10,20 @@ import (
 
 	"grpc-go-course-udemy/blog/blogpb"
 
+	"github.com/joho/godotenv"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+var coll *mongo.Collection
 
 type server struct {
 }
-
-var coll *mongo.Collection
 
 // BlogItem -> will serve as database
 type BlogItem struct {
@@ -27,6 +31,42 @@ type BlogItem struct {
 	AuthorID string             `bson:"author_id"`
 	Title    string             `bson:"title"`
 	Content  string             `bson:"content"`
+}
+
+func (*server) CreateBlog(ctx context.Context, req *blogpb.CreateBlogRequest) (*blogpb.CreateBlogResponse, error) {
+	fmt.Println("Creating Blog Request Server")
+	blog := req.GetBlog()
+	data := BlogItem{
+		AuthorID: blog.GetAuthorId(),
+		Title:    blog.GetTitle(),
+		Content:  blog.GetContent(),
+	}
+
+	res, err := coll.InsertOne(context.Background(), data)
+	if err != nil {
+		return nil, status.Errorf(
+			codes.Internal,
+			fmt.Sprintf("Internal Error: %v", err),
+		)
+	}
+
+	oid, ok := res.InsertedID.(primitive.ObjectID)
+	if !ok {
+		return nil, status.Errorf(
+			codes.Internal,
+			fmt.Sprintf("Cannot convert to OID"),
+		)
+	}
+
+	return &blogpb.CreateBlogResponse{
+		Blog: &blogpb.Blog{
+			Id: oid.Hex(),
+			AuthorId: blog.GetAuthorId(),
+			Title:    blog.GetTitle(),
+			Content:  blog.GetContent(),
+		},
+	}, nil 
+
 }
 
 func main() {
@@ -37,7 +77,13 @@ func main() {
 
 	// Connect Mongodb
 	// https://docs.mongodb.com/drivers/go/current/quick-start/
-	uri := "mongodb+srv://el-joft:123456ABC@cluster0.h0hik.mongodb.net"
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found")
+	}
+	uri := os.Getenv("MONGODB_URI")
+	if uri == "" {
+		log.Fatal("You must set your 'MONGODB_URI' environmental variable. See\n\t https://docs.mongodb.com/drivers/go/current/usage-examples/")
+	}
 	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(uri))
 	if err != nil {
 		panic(err)
